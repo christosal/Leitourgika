@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_TIMERS
 #include <unistd.h>
 #include <time.h>
 #include <math.h>
@@ -13,153 +13,225 @@
 
 pthread_mutex_t caller_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t account_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t average_time_waiting_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t average_time_waiting_callers_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t average_time_service_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t plan_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t plan_zoneA_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t plan_zoneB_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t plan_zoneC_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t screen_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-
-
-
-typedef struct product_arguments {
-	int firstArgument;
-	int secondArgument;
-} PRODUCT_ARGUMENTS;
-
-
-
+int planChooser;
 
 
 
 void * callers(void *args){
+	
 
-	PRODUCT_ARGUMENTS * products;
-	products = (PRODUCT_ARGUMENTS *)args;
-
-	int seats= rand() % Nseathigh + Nseatlow;
-	int transaction = products->secondArgument;
 	int rc;
+	int id = *(int*) args;
+
 
 	rc = pthread_mutex_lock(&caller_mutex);
+
+	
+	if (rc != 0) {	
+		printf("ERROR: return code from pthread_mutex_lock() is %d\n", rc);
+		pthread_exit(&rc);
+	}
+
+	int randomNumber = (rand()%9)+1;
+	if (randomNumber<=PzoneA){
+		planChooser=1;
+	}else if (randomNumber<=PzoneB){
+		planChooser=2;
+	}else{
+		planChooser=3;
+	}
+
+	int seats= (rand() % (Nseathigh-1)) + Nseatlow;
+
+	switch (planChooser)
+	{
+	case (1):
+		printf("Πελάτης %u, καλεί και θέλει %d θέσεις στην ζώνη %c\n",id,seats,'A');
+		break;
+	case (2):
+		printf("Πελάτης %u, καλεί και θέλει %d θέσεις στην ζώνη %c\n",id,seats,'B');
+		break;
+	case (3):
+		printf("Πελάτης %u, καλεί και θέλει %d θέσεις στην ζώνη %c\n",id,seats,'C');
+		break;
+	}
+	
+	
+	time_t start=time(NULL);
+	
+	//sleep(1);
+	while (Ntel== 0) {	
+		rc = pthread_cond_wait(&cond, &caller_mutex);
 		if (rc != 0) {	
-			printf("ERROR: return code from pthread_mutex_lock() is %d\n", rc);
+			printf("ERROR: return code from pthread_cond_wait() is %d\n", rc);
 			pthread_exit(&rc);
-		}		
-	available_callers-=1;
-		//an oi dia8esimoi tilefonites einai 0 tote mpes se wait
-		result = clock_gettime(CLOCK_REALTIME, &start);
+		}
+	}
+
+	Ntel-=1;
+	printf("Πελάτης %d, εξυπηρετείται... Τηλεφωνητές = %d\n",id,Ntel);
+
+	switch (planChooser)
+	{
+	case (1):
+		counterForSeatsZoneA+=seats;
+		break;
+	case (2):
+		counterForSeatsZoneB+=seats;
+		break;
+	case (3):
+		counterForSeatsZoneC+=seats;
+		break;
+	}
+	
+	time_t end = time(NULL);
+	pthread_mutex_unlock(&caller_mutex);
+
+	pthread_mutex_lock(&average_time_waiting_callers_mutex);
+		average_time_waiting+= (end-start);
+	pthread_mutex_unlock(&average_time_waiting_callers_mutex);
+
 			
-		
-		while (available_callers<= 0) {	
-		
-			rc = pthread_cond_wait(&cond, &caller_mutex);
-			if (rc != 0) {	
-				printf("ERROR: return code from pthread_cond_wait() is %d\n", rc);
-				pthread_exit(&rc);
-			}
+	
+
+	
+	time_t start2 = time(NULL);
+	if (checkForAvailableSeats(planChooser,seats)){
+		if (planChooser==1){
+			pthread_mutex_lock(&plan_zoneA_mutex);
+				int Nreserved[seats];
+				for (int y=0;y<seats;y++){
+					Nreserved[y]=reserveSeats(seats,planChooser,id);
+				}
+			pthread_mutex_unlock(&plan_zoneA_mutex);
+
+			int num_seconds = (rand() % (tseathigh-1)) + tseatlow;
 			
 		}
+	}
 
-		
-	clock_gettime(CLOCK_REALTIME, &end);
-	num_seconds_waiting += end.tv_sec-start.tv_sec;
-
-	counter +=seats;
-
-	if(seats<=num_available_seats){
+	if(counter<=num_available_seats){
 			
-			result = clock_gettime(CLOCK_REALTIME, &start);
-			unsigned int num_seconds = rand() % 5 + 5;
+			pthread_mutex_lock(&plan_mutex);
+			int Nreserved[seats];
+			for (int y=0;y<seats;y++){
+				Nreserved[y]=reserveSeats(seats,id);
+			}
+			pthread_mutex_unlock(&plan_mutex);
+			
+			int num_seconds = rand() % tseathigh + tseatlow;
 			sleep(num_seconds);
 			
-
-			num_available_seats -= seats;
+			pthread_mutex_lock(&average_time_service_mutex);
+			
 			int r = rand() % 99 +1;
 			
 			if(r<=90){
 				
 				total_revenue += Cseat*seats;
 				
-				printf("oi dia8esimoi callers einai: %d \n",available_callers);
-				printf("H sunallagi olokliro8ike epitixos. O arithmos sunallagis einai %d \n",transaction);
+				//printf("oi dia8esimoi callers einai: %d \n",available_callers);
+				printf("Η κράτηση ολοκληρώθηκε επιτυχώς. Ο αριθμός συναλλαγής είναι <%d> , ",id);
 				
-				printf(	"oi theseis sas einai<");
-				for(int i=0; i<seats-1; i++){
-				printf(	"%d,",counter -seats +i); 	
+				printf(	"οι θέσεις σας είναι οι <");
+				for(int i=0; i<seats; i++){
+				printf(	"%d,",Nreserved[i]+1); 	
 				}
-				printf(	"%d> kai to kostos sunallagis einai <%d>\n",counter-1,seats*Cseat);
+				printf(	"> και το κόστος συναλλαγής είναι <%d> ευρώ",seats*Cseat);
 				
 			}
-
 			else {
 				counter-=seats;
-				num_available_seats+=seats;
-				printf("ERROR: Not enough cash in credit card.\n");
+				for (int y=0;y<seats;y++){
+					Nseat[Nreserved[y]]=0;
 				}
+				printf("--> ERROR: Η κράτηση ματαιώθηκε γιατί η συναλλαγή με την πιστωτική κάρτα δεν έγινε αποδεκτή .");
+				}
+	}else{
+		counter-=seats;	
+		printf("--> ERROR: Η κράτηση ματαιώθηκε γιατί δεν υπάρχουν αρκετές διαθέσιμες θέσεις..");
 	}
-
-	else{	
-	printf("ERROR: not enough available seats.\n");
-	}
-
-	clock_gettime(CLOCK_REALTIME, &end);
-	num_seconds_servicing += end.tv_sec-start.tv_sec;
-
-	available_callers +=1;
-	rc = pthread_mutex_unlock(&caller_mutex);
+	Ntel +=1;
+	time_t end2 = time(NULL);
+	printf(	". Χρόνος εξ = %.2f \n",(float)(end2-start2));
+	average_time_servicing += end2-start2;
+	rc = pthread_cond_broadcast(&cond);
 		if (rc != 0) {	
-			printf("ERROR: return code from pthread_mutex_unlock() is %d\n", rc);
+			printf("--> ERROR: return code from pthread_cond_broadcast() is %d\n", rc);
 			pthread_exit(&rc);
 		}
-	pthread_mutex_lock(&caller_mutex);
-		
-		
-		
-		//eidopoiei ta alla threads oti exei ksekinisei.
-	if(available_callers==1){	rc = pthread_cond_broadcast(&cond);}
+	rc = pthread_mutex_unlock(&average_time_service_mutex);
 		if (rc != 0) {	
-			printf("ERROR: return code from pthread_cond_broadcast() is %d\n", rc);
+			printf("--> ERROR: return code from pthread_mutex_unlock() is %d\n", rc);
 			pthread_exit(&rc);
 		}
-		pthread_mutex_unlock(&caller_mutex);
-
-	pthread_exit(NULL);
 
 }
 
-
-
-
-
-
-
-void * customers(void* args){
- 
+bool checkForAvailableSeats(int planChooser,int seats){
+	int counter=0;
+	if (planChooser==1){
+		bool isFound=false;
+		for (int i=0;i<NzoneA;i++){
+			for (int y=0;y<Nseat;y++){
+				if (TheatrePlanZoneA[i][y]==0){
+					if (y+seats-1<=Nseat){
+						for (int p=y;p<y+seats-1;p++){
+							if (TheatrePlanZoneA[i][p]!=0){
+								break;
+							}else if ((p==y+seats-1))
+							{
+								return true;
+							}
+						}
+					}else{
+						break;
+					}
+				}
+				if (isFound) break;
+			}
+			if(isFound) break;
+		}
+		return false;
+	}
 }
 
 
-
-
+int reserveSeats(int numberOfReservedSeats,int id){
+	for (int i=0;i<sizeof(Nseat);i++){
+		if (Nseat[i]==0){
+			Nseat[i]=id;
+			return i;
+		}
+	}
+	return -1;
+}
 
 
 int main(int argc, char *argv[]) {
-	unsigned int tn= atoi(argv[1]);
-		//pthread_t Mainthread;
+	int CUSTOMERS= 10;//atoi(argv[1]);
+	int seed = 10;
 	int rc;
 
-	srand(tn);
+	srand(seed);
 
-	//pthread_create( &Mainthread, NULL, customers, NULL);
 
-	PRODUCT_ARGUMENTS prod;
-	pthread_t thread_id[100];
-	int countArray[100];
-	int threadCount;
+
+	pthread_t thread_id[CUSTOMERS];
+	int countArray[CUSTOMERS];
+	int threadCount,threadCount2;
 		
-		for(threadCount = 0; threadCount <100; threadCount++) {
+		for(threadCount = 0; threadCount < CUSTOMERS; threadCount++) {
 			countArray[threadCount] = threadCount + 1;
 			/*dimiourgia tou thread*/
-				rc = pthread_create(&thread_id[threadCount], NULL, callers, &countArray[threadCount]);
+			rc = pthread_create(&thread_id[threadCount], NULL, callers, &countArray[threadCount]);
 			
 			/*elegxos oti to thread dimiourgithike swsta.*/
 				if (rc != 0) {
@@ -167,10 +239,10 @@ int main(int argc, char *argv[]) {
 					exit(-1);
 				}
 			}
-	for(threadCount = 0; threadCount < 100; threadCount++) {
-			countArray[threadCount] = threadCount + 1;
+	for(threadCount2 = 0; threadCount2 < CUSTOMERS; threadCount2++) {
+			//countArray[threadCount] = threadCount + 1;
 			/*dimiourgia tou thread*/
-				rc = pthread_join(thread_id[threadCount], NULL);
+				rc = pthread_join(thread_id[threadCount2], NULL);
 			
 			
 			}
@@ -179,10 +251,17 @@ int main(int argc, char *argv[]) {
 	//pthread_join(Mainthread,NULL);
 
 	pthread_mutex_destroy(&caller_mutex);
+	pthread_mutex_destroy(&average_time_service_mutex);
 	pthread_cond_destroy(&cond);
-		printf("Main: Thread finished.\n");
-		printf("total revenue is %d\n", total_revenue);
-		printf("o mesos xronos se deuterolepta pou perimenan sthn anamoni einai: %d \n",num_seconds_waiting/100);
-		printf("o mesos xronos se deuterolepta pou perimenan gia to service einai: %d \n",num_seconds_servicing/100);
+		printf("\nΤο πλάνο των θέσεων είναι:\n");
+		for (int i=0;i<counter;i++){
+			printf("  ( Θέση %d -> Πελάτης %d ) ",i+1,Nseat[i]);
+			if (i+1%5==0){
+				printf("\n");
+			}
+		}
+		printf("\nΤα Συνολικά Έσοδα είναι: %d ευρώ\n", total_revenue);
+		printf("Ο μέσος χρόνος αναμονής είναι: %.2f sec \n",average_time_waiting/CUSTOMERS);
+		printf("Ο μέσος χρόνος εξυπηρέτησης είναι: %.2f sec \n",average_time_servicing/CUSTOMERS);
 		return 1;
 }
